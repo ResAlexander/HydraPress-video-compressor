@@ -6,8 +6,9 @@
   -c  NUM    CRF 质量值 (默认: 22，越小质量越高)
   -p  NAME   编码预设   (默认: slow)
   -n  NUM    nice优先级 (默认: 10，0=正常 19=最低)
-  -f  PAT    文件匹配   (默认: *.mp4)
-  --subdirs             递归处理子目录
+   -f  PAT    文件匹配   (默认: *.mp4)
+   -b  DEPTH  色深       (默认: auto，跟随源文件；可选: 8, 10, 12)
+   --subdirs             递归处理子目录
   --no-notify           禁用完成通知
   --help                查看完整说明 (含概念解释)
 

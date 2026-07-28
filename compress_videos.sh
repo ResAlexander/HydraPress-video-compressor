@@ -32,6 +32,7 @@ set -uo pipefail
 #   -p, --preset  编码速度预设 (默认slow，可选: ultrafast~veryslow)
 #   -n, --nice    nice 优先级 (默认10，0=不降级，19=最低)
 #   -f, --filter  文件名匹配 (默认 *.mp4)
+#   -b, --bit     色深 8/10/12/auto (默认 auto，跟随源文件)
 #   --subdirs     递归处理子目录 (默认关闭)
 #   --no-notify   禁用完成通知
 #   --help        显示帮助
@@ -43,6 +44,7 @@ CRF=22                                          # CRF 质量值: 18=视觉无损
 PRESET="slow"                                   # 编码预设: 越慢质量越好/体积越小
 NICE_LEVEL=10                                   # nice 优先级: 0=正常，10=低，19=最低
 FILE_PATTERN="*.mp4"                            # 源文件名匹配模式
+BIT_DEPTH="auto"                                # 色深: 8/10/12/auto (默认 auto 跟随源文件)
 SUB_DIRS=false                                  # 是否递归处理子目录
 NOTIFICATION=true                               # 完成后弹出 macOS 通知
 
@@ -73,6 +75,7 @@ while [[ $# -gt 0 ]]; do
         -p|--preset)  PRESET="$2";       shift 2 ;;
         -n|--nice)    NICE_LEVEL="$2";   shift 2 ;;
         -f|--filter)  FILE_PATTERN="$2"; shift 2 ;;
+        -b|--bit)     BIT_DEPTH="$2";    shift 2 ;;
         --subdirs)    SUB_DIRS=true;     shift ;;
         --no-notify)  NOTIFICATION=false; shift ;;
         -h)           show_help; exit 0 ;;
@@ -93,6 +96,37 @@ check_deps() {
     fi
 }
 
+# 检查 BIT_DEPTH 参数是否合法
+validate_bit_depth() {
+    case "$BIT_DEPTH" in
+        8|10|12|auto) ;;
+        *) echo "[错误] 不支持的色深: $BIT_DEPTH (可选: 8, 10, 12, auto)"; exit 1 ;;
+    esac
+}
+
+# 色深 → ffmpeg pixel format
+pix_fmt_for_bit_depth() {
+    local depth=$1
+    case "$depth" in
+        8)  echo "yuv420p" ;;
+        10) echo "yuv420p10le" ;;
+        12) echo "yuv420p12le" ;;
+    esac
+}
+
+# 检测源视频的色深 (用于 auto 模式)
+detect_source_bit_depth() {
+    local input=$1
+    local pix_fmt
+    pix_fmt=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt \
+              -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+    case "$pix_fmt" in
+        *10le*) echo 10 ;;
+        *12le*) echo 12 ;;
+        *)      echo 8  ;;
+    esac
+}
+
 # 格式化文件大小为可读字符串 (字节 → KB/MB/GB)
 human_size() {
     local bytes=$1
@@ -109,6 +143,7 @@ human_size() {
 }
 
 check_deps
+validate_bit_depth
 
 # 阻止系统休眠 (caffeinate 在后台运行，脚本退出时自动结束)
 caffeinate -i -w $$ &
@@ -159,7 +194,8 @@ echo "  输出目录:   $OUTPUT_DIR"
 echo "  文件模式:   $FILE_PATTERN"
 echo "  子目录:     $([ "$SUB_DIRS" = true ] && echo "是" || echo "否")"
 echo "  待处理:     $total 个文件"
-echo "  编码器:     libx265 (preset=$PRESET, crf=$CRF, 8-bit)"
+echo "  色深:       $([ "$BIT_DEPTH" = "auto" ] && echo "自动(每个文件保持原色深)" || echo "${BIT_DEPTH}-bit")"
+echo "  编码器:     libx265 (preset=$PRESET, crf=$CRF)"
 echo "  优先级:     nice -n $NICE_LEVEL"
 echo "  源文件不会被修改或删除"
 echo "=========================================="
@@ -191,18 +227,28 @@ for f in "${files[@]}"; do
 
     echo "[$(date '+%H:%M:%S')] [$((processed + skipped + 1))/$total] 处理: $filename ($input_size_str)"
 
+    # ---------- 确定 pixel format ----------
+    if [ "$BIT_DEPTH" = "auto" ]; then
+        actual_depth=$(detect_source_bit_depth "$f")
+        echo "  检测色深: $actual_depth-bit"
+    else
+        actual_depth=$BIT_DEPTH
+    fi
+    PIX_FMT=$(pix_fmt_for_bit_depth "$actual_depth")
+    echo "  输出色深: $actual_depth-bit (pix_fmt=$PIX_FMT)"
+
     # ---------- 调用 ffmpeg 转码 ----------
     # -c:v libx265   使用 HEVC 编码
     # -tag:v hvc1    确保 Apple 设备兼容 (QuickTime/iOS)
     # -c:a copy      音频直接复制，不重新编码
-    # -pix_fmt yuv420p  8-bit 4:2:0 (兼容性最好，速度最快)
+    # -pix_fmt       根据 --bit 参数选择 (8=yuv420p, 10=yuv420p10le, etc.)
     # -progress pipe:1  输出实时进度
     set +e
     nice -n "$NICE_LEVEL" ffmpeg -y -i "$f" \
         -c:v libx265 \
         -preset "$PRESET" \
         -crf "$CRF" \
-        -pix_fmt yuv420p \
+        -pix_fmt "$PIX_FMT" \
         -tag:v hvc1 \
         -c:a copy \
         -progress pipe:1 \
