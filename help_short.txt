@@ -1,0 +1,25 @@
+用法: ./compress_videos.sh -i 源目录 [选项]
+
+参数速查:
+  -i  DIR    源视频目录 (必填)
+  -o  DIR    输出目录 (默认: 源目录_compressed)
+  -c  NUM    CRF 质量值 (默认: 22，越小质量越高)
+  -p  NAME   编码预设   (默认: slow)
+  -n  NUM    nice优先级 (默认: 10，0=正常 19=最低)
+  -f  PAT    文件匹配   (默认: *.mp4)
+  --subdirs             递归处理子目录
+  --no-notify           禁用完成通知
+  --help                查看完整说明 (含概念解释)
+
+示例:
+  # 基本用法 — 压缩 ~/Videos 下所有 mp4
+  ./compress_videos.sh -i ~/Videos
+
+  # 视觉无损 (CRF 18)，处理 mov 文件
+  ./compress_videos.sh -i ~/Videos -c 18 -f '*.mov'
+
+  # 快速压缩，包含子目录
+  ./compress_videos.sh -i ~/Videos -p fast --subdirs
+
+  # 全部自定义
+  ./compress_videos.sh -i ~/Videos -o ~/Compressed -c 20 -p medium -n 5
