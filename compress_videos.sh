@@ -127,6 +127,58 @@ detect_source_bit_depth() {
     esac
 }
 
+# 估算源视频在 HEVC 下的等效 CRF（基于码率、分辨率、编码格式）
+# 用于防止用户设定的 CRF 过高导致输出文件反而变大
+estimate_source_crf() {
+    local input=$1
+
+    local width height pix_count
+    width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width \
+            -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+    height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height \
+             -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+    pix_count=$((width * height))
+    [ "$pix_count" -le 0 ] && pix_count=2073600
+
+    # 获取码率（如果 stream 层没有，从 format 层取）
+    local bitrate
+    bitrate=$(ffprobe -v error -select_streams v:0 -show_entries stream=bit_rate \
+              -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+    if [ -z "$bitrate" ] || [ "$bitrate" = "N/A" ] || [ "$bitrate" -le 0 ] 2>/dev/null; then
+        local duration
+        duration=$(ffprobe -v error -show_entries format=duration \
+                   -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+        local file_size
+        file_size=$(stat -f%z "$input")
+        bitrate=$(echo "scale=0; $file_size * 8 / ${duration%.*}" | bc)
+    fi
+
+    local bitrate_mbps
+    bitrate_mbps=$(echo "scale=4; $bitrate / 1000000" | bc)
+
+    # 归一化到 1080p (1920x1080) 等效码率
+    local ref_pix=$((1920 * 1080))
+    local norm_bitrate
+    norm_bitrate=$(echo "scale=4; $bitrate_mbps * $ref_pix / $pix_count" | bc)
+
+    # HEVC 1080p 参考: CRF 20 ≈ 20 Mbps, 每 +1 CRF 码率乘 ~0.85
+    #   CRF = 20 + ln(bitrate_mbps / 20) / ln(0.85)
+    local estimated
+    estimated=$(echo "scale=2; 20 + l($norm_bitrate / 20) / l(0.85)" | bc -l 2>/dev/null)
+
+    # 处理估算失败的情况
+    if [ -z "$estimated" ] || [ "$(echo "$estimated < 0" | bc -l 2>/dev/null)" -eq 1 ]; then
+        estimated=0
+    fi
+    if [ "$(echo "$estimated > 51" | bc -l 2>/dev/null)" -eq 1 ]; then
+        estimated=51
+    fi
+
+    # 向上取整，保守保证输出不超过源文件大小
+    python3 -c "import math; print(int(math.ceil($estimated)))" 2>/dev/null || \
+    printf "%.0f" "$estimated" | awk '{print $1+1}'
+}
+
 # 格式化文件大小为可读字符串 (字节 → KB/MB/GB)
 human_size() {
     local bytes=$1
@@ -237,6 +289,15 @@ for f in "${files[@]}"; do
     PIX_FMT=$(pix_fmt_for_bit_depth "$actual_depth")
     echo "  输出色深: $actual_depth-bit (pix_fmt=$PIX_FMT)"
 
+    # ---------- CRF 合理性检查 ----------
+    # 估算源视频在 HEVC 下的等效 CRF，若用户 CRF 低于该值则自动抬高
+    source_crf=$(estimate_source_crf "$f")
+    actual_crf=$CRF
+    if [ "$(echo "$actual_crf < $source_crf" | bc 2>/dev/null)" -eq 1 ]; then
+        echo "  [警告] $filename CRF=$actual_crf 过低, 使用 $source_crf"
+        actual_crf=$source_crf
+    fi
+
     # ---------- 调用 ffmpeg 转码 ----------
     # -c:v libx265   使用 HEVC 编码
     # -tag:v hvc1    确保 Apple 设备兼容 (QuickTime/iOS)
@@ -247,7 +308,7 @@ for f in "${files[@]}"; do
     nice -n "$NICE_LEVEL" ffmpeg -y -i "$f" \
         -c:v libx265 \
         -preset "$PRESET" \
-        -crf "$CRF" \
+        -crf "$actual_crf" \
         -pix_fmt "$PIX_FMT" \
         -tag:v hvc1 \
         -c:a copy \
