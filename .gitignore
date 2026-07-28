@@ -1,3 +1,7 @@
 [Vv]ideo/*
 [Vv]ideo_compressed/*
 .videocache/*
+
+.gitignore*
+gitignore*
+.*
