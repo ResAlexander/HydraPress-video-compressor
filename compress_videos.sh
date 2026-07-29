@@ -174,9 +174,10 @@ estimate_source_crf() {
         estimated=51
     fi
 
-    # 向上取整，保守保证输出不超过源文件大小
-    python3 -c "import math; print(int(math.ceil($estimated)))" 2>/dev/null || \
-    printf "%.0f" "$estimated" | awk '{print $1+1}'
+    # 向上取整再加 1 安全余量，避免内容复杂度导致估算偏小
+    python3 -c "import math; print(int(math.ceil($estimated)) + 1)" 2>/dev/null || \
+    python3 -c "print(int($estimated / 1 + 0.999) + 1)" 2>/dev/null || \
+    echo "${estimated%.*}" | awk '{print $1+2}'
 }
 
 # 格式化文件大小为可读字符串 (字节 → KB/MB/GB)
@@ -298,6 +299,20 @@ for f in "${files[@]}"; do
         actual_crf=$source_crf
     fi
 
+    # ---------- 计算总帧数用于进度条 ----------
+    total_frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
+        -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null)
+    if [ -z "$total_frames" ] || [ "$total_frames" = "N/A" ] || [ "$total_frames" -le 0 ] 2>/dev/null; then
+        fps_frac=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate \
+            -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null)
+        duration=$(ffprobe -v error -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null)
+        if [ -n "$fps_frac" ] && [ "$fps_frac" != "N/A" ] && [ -n "$duration" ] && [ "$duration" != "N/A" ]; then
+            total_frames=$(echo "scale=0; $duration * ($fps_frac) / 1" | bc -l 2>/dev/null)
+        fi
+    fi
+    total_frames=${total_frames:-0}
+
     # ---------- 调用 ffmpeg 转码 ----------
     # -c:v libx265   使用 HEVC 编码
     # -tag:v hvc1    确保 Apple 设备兼容 (QuickTime/iOS)
@@ -313,9 +328,52 @@ for f in "${files[@]}"; do
         -tag:v hvc1 \
         -c:a copy \
         -progress pipe:1 \
-        "$output" 2>&1 | grep -E '^(frame=|fps=|bitrate=|total_size=)' | while read -r line; do
-            echo "  $line"
+        "$output" 2>&1 | {
+        frame_cur=0
+        fps_val=""
+        bitrate_val=""
+        size_val=""
+        while IFS= read -r line; do
+            case "$line" in
+                frame=*)
+                    val=${line#frame=}
+                    # 跳过 stderr 混合行（如 "frame=123 fps=..."）
+                    case "$val" in *[!0-9]*) continue;; esac
+                    frame_cur=$val
+                    if [ "$total_frames" -gt 0 ] 2>/dev/null; then
+                        pct=$((frame_cur * 100 / total_frames))
+                        [ "$pct" -gt 100 ] && pct=100
+                    else
+                        pct=-1
+                    fi
+                    # 构建 fps/bitrate 信息后缀
+                    info=""
+                    [ -n "$fps_val" ] && info=" fps=$fps_val"
+                    [ -n "$bitrate_val" ] && info="${info} bitrate=$bitrate_val"
+                    if [ "$pct" -ge 0 ] 2>/dev/null; then
+                        bar_width=40
+                        filled=$((pct * bar_width / 100))
+                        bar=$(printf "%*s" "$filled" "" | tr ' ' '#')
+                        rest=$(printf "%*s" $((bar_width - filled)) "" | tr ' ' '-')
+                        printf "\33[2K\r  [%s%s] %3d%%%s" "$bar" "$rest" "$pct" "$info"
+                    else
+                        printf "\33[2K\r  [---- progress ----]%s" "$info"
+                    fi
+                    ;;
+                fps=*)
+                    fps_val="${line#fps=}"
+                    ;;
+                bitrate=*)
+                    bitrate_val="${line#bitrate=}"
+                    ;;
+                total_size=*)
+                    size_val="${line#total_size=}"
+                    ;;
+            esac
         done
+        printf "\n"
+        [ -n "$size_val" ] && echo "  total_size=${size_val}"
+    }
     ffmpeg_status=$?
     set -e
 
