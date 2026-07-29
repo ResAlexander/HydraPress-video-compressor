@@ -410,8 +410,8 @@ echo "  完成:   $processed 个"
 echo "  跳过:   $skipped 个"
 echo "  失败:   $failed 个"
 if [ -n "$total_savings" ]; then
-    echo "  压缩前: $(awk "BEGIN {printf \"%.2f\", $total_input_size / 1073741824}") GB"
-    echo "  压缩后: $(awk "BEGIN {printf \"%.2f\", $total_output_size / 1073741824}") GB"
+    echo "  压缩前: $(echo "scale=2; $total_input_size / 1073741824" | bc | sed 's/^\./0./') GB"
+    echo "  压缩后: $(echo "scale=2; $total_output_size / 1073741824" | bc | sed 's/^\./0./') GB"
     echo "  节省:   ${total_savings}%"
 fi
 echo "=========================================="
