@@ -159,10 +159,27 @@ estimate_source_crf() {
     fi
     [ "$probe_frames" -lt 5 ] && probe_frames=5
 
+    # 跳过开头 ~10% 视频时长（最长 10 秒），避免手机录制初期卡顿帧影响探针
+    local seek_at=0
+    local probe_duration_total
+    probe_duration_total=$(ffprobe -v error -show_entries format=duration \
+                          -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+    if [ -n "$probe_duration_total" ] && [ "$(echo "$probe_duration_total > 10" | bc -l 2>/dev/null)" -eq 1 ]; then
+        seek_at=$(echo "scale=0; $probe_duration_total * 0.1 / 1" | bc 2>/dev/null)
+        [ "$seek_at" -gt 10 ] && seek_at=10
+        [ "$seek_at" -lt 2 ] && seek_at=2
+    fi
+
     local tmpfile="/tmp/probe_${$}_${RANDOM}.mp4"
-    ffmpeg -y -i "$input" -vframes "$probe_frames" \
-        -c:v libx265 -preset "$preset" -crf "$probe_crf" \
-        -an "$tmpfile" 2>/dev/null
+    if [ "$seek_at" -gt 0 ]; then
+        ffmpeg -y -ss "$seek_at" -i "$input" -vframes "$probe_frames" \
+            -c:v libx265 -preset "$preset" -crf "$probe_crf" \
+            -an "$tmpfile" 2>/dev/null
+    else
+        ffmpeg -y -i "$input" -vframes "$probe_frames" \
+            -c:v libx265 -preset "$preset" -crf "$probe_crf" \
+            -an "$tmpfile" 2>/dev/null
+    fi
 
     local probe_size
     probe_size=$(stat -f%z "$tmpfile" 2>/dev/null)
