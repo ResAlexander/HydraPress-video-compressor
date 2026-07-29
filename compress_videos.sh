@@ -127,54 +127,89 @@ detect_source_bit_depth() {
     esac
 }
 
-# 估算源视频在 HEVC 下的等效 CRF（基于码率、分辨率、编码格式）
-# 用于防止用户设定的 CRF 过高导致输出文件反而变大
+# 通过短片段编码 probe 估算源视频的等效 CRF（实际测量编码器行为）
+# 用于防止用户设定的 CRF 过低导致输出文件反而变大
 estimate_source_crf() {
     local input=$1
+    local preset=$2
 
-    local width height pix_count
-    width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width \
-            -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-    height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height \
-             -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-    pix_count=$((width * height))
-    [ "$pix_count" -le 0 ] && pix_count=2073600
-
-    # 获取码率（如果 stream 层没有，从 format 层取）
+    # 获取源视频码率（video stream 层）
     local bitrate
     bitrate=$(ffprobe -v error -select_streams v:0 -show_entries stream=bit_rate \
               -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
     if [ -z "$bitrate" ] || [ "$bitrate" = "N/A" ] || [ "$bitrate" -le 0 ] 2>/dev/null; then
-        local duration
+        local duration file_size
         duration=$(ffprobe -v error -show_entries format=duration \
                    -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-        local file_size
         file_size=$(stat -f%z "$input")
         bitrate=$(echo "scale=0; $file_size * 8 / ${duration%.*}" | bc)
     fi
 
-    local bitrate_mbps
-    bitrate_mbps=$(echo "scale=4; $bitrate / 1000000" | bc)
+    local source_bitrate_mbps
+    source_bitrate_mbps=$(echo "scale=4; $bitrate / 1000000" | bc)
 
-    # 归一化到 1080p (1920x1080) 等效码率
-    local ref_pix=$((1920 * 1080))
-    local norm_bitrate
-    norm_bitrate=$(echo "scale=4; $bitrate_mbps * $ref_pix / $pix_count" | bc)
-
-    # HEVC 1080p 参考: CRF 20 ≈ 20 Mbps, 每 +1 CRF 码率乘 ~0.85
-    #   CRF = 20 + ln(bitrate_mbps / 20) / ln(0.85)
-    local estimated
-    estimated=$(echo "scale=2; 20 + l($norm_bitrate / 20) / l(0.85)" | bc -l 2>/dev/null)
-
-    # 处理估算失败的情况
-    if [ -z "$estimated" ] || [ "$(echo "$estimated < 0" | bc -l 2>/dev/null)" -eq 1 ]; then
-        estimated=0
+    # --- 短片段探针编码 ---
+    local probe_crf=28
+    local probe_frames=30
+    local total_frames
+    total_frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
+                   -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+    if [ -n "$total_frames" ] && [ "$total_frames" -gt 0 ] 2>/dev/null && [ "$total_frames" -lt 60 ]; then
+        probe_frames=$((total_frames / 2))
     fi
+    [ "$probe_frames" -lt 5 ] && probe_frames=5
+
+    local tmpfile="/tmp/probe_${$}_${RANDOM}.mp4"
+    ffmpeg -y -i "$input" -vframes "$probe_frames" \
+        -c:v libx265 -preset "$preset" -crf "$probe_crf" \
+        -an "$tmpfile" 2>/dev/null
+
+    local probe_size
+    probe_size=$(stat -f%z "$tmpfile" 2>/dev/null)
+    rm -f "$tmpfile"
+
+    local estimated=""
+    if [ -n "$probe_size" ] && [ "$probe_size" -gt 1000 ]; then
+        local fps fps_num fps_den probe_duration probe_bitrate_mbps
+        fps=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate \
+              -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+        fps_num=${fps%%/*}
+        fps_den=${fps##*/}
+        [ -z "$fps_den" ] || [ "$fps_den" -eq 0 ] 2>/dev/null && fps_den=1
+        probe_duration=$(echo "scale=6; $probe_frames * $fps_den / $fps_num" | bc)
+        probe_bitrate_mbps=$(echo "scale=4; $probe_size * 8 / $probe_duration / 1000000" | bc)
+
+        if [ "$(echo "$probe_bitrate_mbps > 0" | bc -l)" -eq 1 ]; then
+            # CRF = probe_crf + ln(source_bitrate / probe_bitrate) / ln(0.85)
+            estimated=$(echo "scale=2; $probe_crf + l($source_bitrate_mbps / $probe_bitrate_mbps) / l(0.85)" | bc -l 2>/dev/null)
+        fi
+    fi
+
+    # probe 失败时回退到公式估算
+    if [ -z "$estimated" ] || [ "$(echo "$estimated < 0" | bc -l 2>/dev/null)" -eq 1 ]; then
+        local width height pix_count
+        width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width \
+                -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+        height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height \
+                 -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+        pix_count=$((width * height))
+        [ "$pix_count" -le 0 ] && pix_count=2073600
+
+        local ref_pix=$((1920 * 1080))
+        local norm_bitrate
+        norm_bitrate=$(echo "scale=4; $source_bitrate_mbps * $ref_pix / $pix_count" | bc)
+
+        estimated=$(echo "scale=2; 20 + l($norm_bitrate / 20) / l(0.85)" | bc -l 2>/dev/null)
+        if [ -z "$estimated" ] || [ "$(echo "$estimated < 0" | bc -l 2>/dev/null)" -eq 1 ]; then
+            estimated=0
+        fi
+    fi
+
     if [ "$(echo "$estimated > 51" | bc -l 2>/dev/null)" -eq 1 ]; then
         estimated=51
     fi
 
-    # 向上取整再加 1 安全余量，避免内容复杂度导致估算偏小
+    # 向上取整再加 1 安全余量
     python3 -c "import math; print(int(math.ceil($estimated)) + 1)" 2>/dev/null || \
     python3 -c "print(int($estimated / 1 + 0.999) + 1)" 2>/dev/null || \
     echo "${estimated%.*}" | awk '{print $1+2}'
@@ -292,7 +327,7 @@ for f in "${files[@]}"; do
 
     # ---------- CRF 合理性检查 ----------
     # 估算源视频在 HEVC 下的等效 CRF，若用户 CRF 低于该值则自动抬高
-    source_crf=$(estimate_source_crf "$f")
+    source_crf=$(estimate_source_crf "$f" "$PRESET")
     actual_crf=$CRF
     if [ "$(echo "$actual_crf < $source_crf" | bc 2>/dev/null)" -eq 1 ]; then
         echo "  [警告] $filename CRF=$actual_crf 过低, 使用 $source_crf"
