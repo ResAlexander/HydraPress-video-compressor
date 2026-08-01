@@ -24,15 +24,20 @@
 
 ```bash
 # 1. 安装依赖（已安装可跳过）
+# Windows 用户见下方 WSL2 / Git Bash
 brew install ffmpeg                    # macOS
 sudo apt install ffmpeg bc             # Debian / Ubuntu
 sudo dnf install ffmpeg bc             # Fedora / RHEL / CentOS
-# Windows 用户见下方 WSL2 / Git Bash
 
 # 2. 下载脚本并授予执行权限
 chmod +x hydrapress
 
-# 3. 开始压缩（推荐配置）
+# 3. 创建视频输入文件夹（可选）
+mkdir video
+
+# 4. 将视频放入video文件夹
+
+# 5. 开始压缩（推荐配置）
 ./hydrapress -i ./Video --profile balanced
 ```
 
