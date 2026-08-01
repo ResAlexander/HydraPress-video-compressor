@@ -7,7 +7,7 @@
                archive      slow+CRF18   收藏归档，质量优先
                balanced     fast+CRF20   日常使用，速度质量平衡 (推荐)
                fast         ultrafast+CRF14  快速处理，文件较大
-               max-compress slow+CRF24   极限压缩，可见画质损失
+               maxcompress slow+CRF24   极限压缩，可见画质损失
   -c  NUM    CRF 质量值 (默认: 22，越小质量越高)
   -p  NAME   编码预设   (默认: slow)
                注意: x265 中越慢文件越大但质量越好 (与 x264 相反)

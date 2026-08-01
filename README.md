@@ -1,116 +1,151 @@
-# 视频压缩脚本
+# compress_videos.sh — macOS 下 HEVC 视频批量压缩工具
 
-将手机拍摄的 H.264 视频（.mp4）批量压缩为 HEVC（H.265）格式，在保持高画质的前提下大幅减小文件体积。
+> 将手机拍摄的 H.264 视频批量压缩为 HEVC（H.265），在保持高画质的前提下大幅减小文件体积
 
-## 环境要求
+[![macOS](https://img.shields.io/badge/-macOS-lightgrey.svg?logo=macos&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
+[![ffmpeg](https://img.shields.io/badge/ffmpeg-5.1.2-green.svg)](https://img.shields.io/badge/bash-lightgrey.svg)
 
-- **macOS**（已测试）
-- **ffmpeg**（需提前安装）
-- **bc**（macOS 自带）
+**特点**  
+- 🚀 批量处理，断点续传，后台运行  
+- 🔒 源文件零风险，永不修改或删除）  
+- ⚡ 原文件写入 .part 临时文件，中断恢复安全  
+- 📊 实时进度条 + 压缩报告，清晰直观  
+- 🎯 一键 Profile 配置，无需深入理解 CRF/preset  
+- 🔄 `--subdirs` 支持递归子目录，自动保留相对路径  
 
-### 安装 ffmpeg
-
-```bash
-brew install ffmpeg
-```
-
-安装后执行 `ffmpeg -version` 确认成功。
+---
 
 ## 快速开始
 
 ```bash
-cd /path/to/compress_videos.sh所在目录
+# 1. 安装依赖（已安装可跳过）
+brew install ffmpeg
+
+# 2. 下载并授予权
 chmod +x compress_videos.sh
 
-# 日常使用（推荐）— 速度与质量平衡
+# 3. 查看配置
+# 3. 开始压缩（推荐配置）
 ./compress_videos.sh -i ./Video --profile balanced
-
-# 收藏归档 — 质量优先
-./compress_videos.sh -i ./Video --profile archive
 ```
 
-## Profile 一键配置
+运行完成后，压缩后的视频会出现在 `./Video_compressed/` 目录。
 
-`--profile` 参数提供预设的 CRF + preset 组合，免去手动调参：
+---
+
+## 配置指南
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-i, --input` | 必填 | 源视频目录 |
+| `-o, --output` | `源目录_compressed` | 输出目录 |
+| `--profile` | - | 一键配置（archive/balanced/fast/maxcompress），覆盖 `-c`/`-p` |
+| `-c, --crf` | `22` | CRF 质量值（14-16 视觉无损，18-20 高画质） |
+| `-p, --preset` | `slow` | 编码预设 |
+| `-n, --nice` | `10` | 进程优先级（0=正常，19=最低） |
+| `-f, --filter` | `*.mp4` | 文件匹配模式 |
+| `-b, --bit` | `auto` | 色深（8/10/12/auto） |
+| `--subdirs` | - | 递归处理子目录 |
+| `--no-notify` | - | 禁用完成通知 |
+
+### Profile 一键配置
 
 | Profile | Preset | CRF | 场景 | 预期输出* |
 |---------|--------|-----|------|----------|
 | `archive` | slow | 18 | 收藏归档，质量优先 | 60-80% 源体积 |
 | `balanced` | fast | 20 | 日常使用，速度质量平衡 | 40-50% 源体积 |
 | `fast` | ultrafast | 14 | 快速处理，文件较大 | 60-95% 源体积 |
-| `max-compress` | slow | 24 | 极限压缩，可见画质损失 | 20-35% 源体积 |
+| `maxcompress` | slow | 24 | 极限压缩，可见画质损失 | 20-35% 源体积 |
 
-> *基于 ~16Mbps OPPO 手机视频实测数据，实际效果因内容而异。
+> 基于 ~16Mbps OPPO 手机视频实测数据，实际效果因内容而异。
 
-也可以不用 profile，直接用 `-c` 和 `-p` 自由组合。详见 `x265_encoding_guide.md`。
+---
 
-## 工作流程
+## 高级选项
 
-```
-源目录 (20251227_videos/)
-  ├── VID_001.mp4  ──→  压缩 →  输出目录 (20251227_videos_compressed/)
-  ├── VID_002.mp4  ──→  压缩 →      ├── VID_001.mp4
-  ├── VID_003.mp4  ──→  压缩 →      ├── VID_002.mp4
-  └── ...                           └── VID_003.mp4
-```
+### CRF 参数
 
-- **源文件不会被修改或删除**
-- **已存在的输出文件自动跳过**，支持断点续传
-- 执行途中随时可以 Ctrl+C 中断，重跑即可继续
+- **14-16** — 视觉无损（推荐收藏归档）
+- **18-20** — 极高画质，体积更小
+- **22** — 高质量，默认值
+- **24+** — 视觉有损
 
-## 配置说明
+### Preset 编码速度预设
 
-编辑脚本顶部的 **配置区** 或通过命令行参数覆盖：
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `INPUT_DIR` | （通过 `-i` 指定） | 源文件目录 |
-| `OUTPUT_DIR` | `源目录_compressed` | 压缩结果输出目录 |
-| `CRF` | `22` | 质量参数（14-16视觉无损，18-20极高画质，22默认） |
-| `PRESET` | `slow` | 编码速度预设（见下方说明） |
-| `NICE_LEVEL` | `10` | 进程优先级（10=低优先级，不影响日常使用） |
-| `FILE_PATTERN` | `*.mp4` | 匹配的文件类型 |
-| `BIT_DEPTH` | `auto` | 色深：`auto`=保持原色深；或指定 `8`/`10`/`12` |
-| `NOTIFICATION` | `true` | 完成后是否弹出系统通知 |
-
-> `--profile` 是命令行专用参数（非脚本变量），详见上方 Profile 一键配置。
-
-### CRF 参数速查
-
-- **CRF 14-16** — 视觉无损（推荐收藏归档）
-- **CRF 18-20** — 极高画质，体积更小
-- **CRF 22** — 高质量，默认值
-- **CRF 24+** — 视觉有损
-
-### PRESET 速度预设
-
-> **重要：x265 的 preset 行为与 x264 相反！**
->
-> x264: 越慢 → 文件越小
-> x265: 越慢 → 文件越大（但质量略好）
+⚠️ 在压缩率方面，x265 的 preset 行为与 x264 相反。
 
 在相同 CRF 下：
+- `slow` → 文件最大，质量最优（最慢）
+- `ultrafast` → 文件最小，质量略低（最快）
 
-| Preset | 输出码率 | 质量 (SSIM) | 速度 |
-|--------|---------|------------|------|
-| ultrafast | 最低 | 略低 | 最快 (1×) |
-| fast | 较低 | 中等 | 1.5× |
-| slow | 最高 | 最高 | 3× (最慢) |
+| Preset | 速度 | 质量（SSIM） | 推荐场景 |
+|--------|------|------------|----------|
+| `ultrafast` | 1× | 略低 | 快速处理 |
+| `fast` | 1.5× | 中等 | 日常使用 |
+| `slow` | 3× | 最高 | 收藏归档 |
 
-- **slow**: 质量最优，但慢 3 倍（适合收藏归档）
-- **fast/medium**: 速度与质量平衡（适合日常使用）
-- **ultrafast**: 最快，配合低 CRF 可接近 slow 的效果（适合快速处理）
+---
 
-更多技术细节请参阅 `x265_encoding_guide.md`。
+## 使用示例
 
-## 运行原理
+```bash
+# 收藏归档（质量优先）
+./compress_videos.sh -i ./Videos --profile archive --subdirs
 
-1. 扫描 `INPUT_DIR` 下所有 `*.mp4` 文件
-2. 跳过 `OUTPUT_DIR` 中已存在的同名文件（断点续传）
-3. 以降低的系统优先级运行 ffmpeg，不影响其他操作
-4. 使用 libx265 编码器 + CRF + 自动保持源文件色深
-5. 音频流直接复制，不重新编码
-6. 完成时弹出 macOS 通知
+# 快速处理（时间优先）
+./compress_videos.sh -i ./Videos --profile fast
+
+# 极限压缩（空间优先）
+./compress_videos.sh -i ./Videos --profile maxcompress
+
+# 自定义参数
+./compress_videos.sh -i ./Videos -o ./Compressed -c 18 -p medium --subdirs
+
+# 仅处理特定文件
+./compress_videos.sh -i ./Videos -f "REC*.mp4"
+```
+
+---
+
+## 工作原理
+
+```
+源目录 (Videos/)
+  ├── 2024-08-01.mp4  ──→  压缩 →  ┌── 输出目录 (Videos_compressed/)
+  ├── 2024-08-02.mp4  ──→  压缩 →      │   ├── 2024-08-01.mp4
+  └── ...                           │   └── 2024-08-02.mp4
+```
+
+- 源文件从未被修改或删除
+- 已存在的输出文件自动跳过（断点续传）
+- Ctrl+C 中断 → 重跑继续未完成文件
+- 以降低系统优先级运行，不干扰前台操作
+
+---
+
+## 故障排除
+
+**Q: 运行一半关机了怎么办？**  
+直接重新运行脚本，已压缩文件会被自动跳过，只处理未完成的。
+
+**Q: 转码中电脑发烫/风扇狂转？**  
+将 `nice` 改为 `19`（最低优先级），  
+或 `PRESET` 改为 `fast`/`ultrafast`，  
+或使用较快的 `profile` 。
+
+**Q: 转码后的视频能在手机上播放吗？**  
+可以。输出使用 `-tag:v hvc1` 标记，兼容 iPhone / Android / 电脑。
+
+**Q: 为什么 `ultrafast + CRF 14` 和 `slow + CRF 18` 效果差不多？**  
+x265 的 `slow` 在相同 CRF 下文件更大但质量略好（SSIM +0.004），使用 `ultrafast + 低 CRF` 可以用更少时间达到接近效果。
+
+**Q: 如何恢复原文件？**  
+源文件保留在原目录未被修改。
+
+**Q: 输出目录与源目录相同会怎样？**  
+脚本会拒绝执行（输出目录不能与源目录相同），避免静默跳过所有文件。
+
+---
 
 ## 测试记录
 
@@ -122,37 +157,20 @@ chmod +x compress_videos.sh
 | **系统** | macOS 12.7.6 |
 | **ffmpeg** | 5.1.2 |
 | **源文件** | 22x MP4 (H.264 1080p), total 4.21 GB |
-| **配置** | CRF=22, preset=slow, nice=0, 8-bit |
+| **配置** | CRF=22, preset=slow, nice=10, bit=auto |
 | **耗时** | 约 5 小时 |
 | **输出体积** | 1.53 GB |
 | **压缩率** | **63.7%** |
-  
 
-## FAQs
+---
 
-**Q: 运行一半关机了怎么办？**  
-直接重新运行脚本。已经压缩成功的文件会被自动跳过，只处理未完成的。
+## LICENSE
 
-**Q: 转码中电脑发烫/风扇狂转？**  
-这是非常正常的。可以将 `nice` 配置改为 `19` 将优先级设为最低，不影响前台操作。如果还是觉得热，可以将 `PRESET` 改为 `fast` 或 `ultrafast`。
+MIT License - 详见 [LICENSE](LICENSE)
 
-**Q: 怎么知道跑完了？**  
-默认设置下，跑完会弹出 macOS 桌面通知（右上角气泡）。
+---
 
-**Q: 怎么查看当前进度？**  
-查看终端窗口输出即可。
+## 技术文档
 
-**Q: 压缩后的视频能在手机上播放吗？**  
-可以。脚本使用 `-tag:v hvc1` 标记，生成的 HEVC MP4 在 iPhone / Android / 电脑上均可正常播放。
-
-**Q: 如何恢复原文件？**   
-源文件始终保留在原目录未被修改。如果对结果不满意，直接删除输出目录即可。
-
-**Q: 压缩后的视频和原来画质有区别吗？**  
-对于大多数内容，CRF 18 下 HEVC 编码的 SSIM 在 0.99 以上，肉眼难以区分差异。但复杂/夜景内容在相同 CRF 下 SSIM 可能较低（0.96-0.98），细节会有轻微损失。
-
-**Q: 为什么 ultrafast + CRF 14 和 slow + CRF 18 效果差不多？**  
-在 x265 中，相同 CRF 下 slow 比 ultrafast 产生更大文件（多约 60%），但质量只略好（SSIM +0.004）。因此 ultrafast + 低 CRF 可以用更少时间达到接近的效果。详见 `x265_encoding_guide.md`。
-
-**Q: 为什么不像以前那样自动估算 CRF？**  
-x265 的 CRF → 码率关系是内容相关的，无法用公式或探针准确预估。我们测试了公式法、探针法、ab-av1 工具，均不可靠。因此改为提供 Profile 预设让用户自主选择。详见 `x265_encoding_guide.md`。
+- [x265 编码指南：Preset、CRF、内容类型与输出结果](x265_encoding_guide.md)
+- [快速帮助](`-h`) 与 [完整说明](`--help`) 可在终端查看

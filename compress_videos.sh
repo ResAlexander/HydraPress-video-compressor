@@ -29,7 +29,7 @@ set -uo pipefail
 #
 #   -i, --input   源视频目录
 #   -o, --output  输出目录 (默认: 源目录_compressed)
-#   --profile     一键配置: archive/balanced/fast/max-compress
+#   --profile     一键配置: archive/balanced/fast/maxcompress
 #                 (覆盖 -c 和 -p)
 #   -c, --crf     CRF 值 (默认22，越小质量越高，推荐14~28)
 #   -p, --preset  编码速度预设 (默认slow，可选: ultrafast~veryslow)
@@ -43,7 +43,7 @@ set -uo pipefail
 
 INPUT_DIR=""                                    # 源视频目录 (必填，或用 -i)
 OUTPUT_DIR=""                                   # 输出目录 (留空则自动设为 源目录_compressed)
-PROFILE=""                                      # 一键配置: archive/balanced/fast/max-compress (覆盖 CRF 和 PRESET)
+PROFILE=""                                      # 一键配置: archive/balanced/fast/maxcompress (覆盖 CRF 和 PRESET)
 CRF=22                                          # CRF 质量值: 14-16=视觉无损，18-20=极高画质，22=默认，24+=有损
 PRESET="slow"                                   # 编码预设: 注意 x265 中越慢文件越大但质量越好(与x264相反)
 NICE_LEVEL=10                                   # nice 优先级: 0=正常，10=低，19=最低
@@ -60,8 +60,8 @@ apply_profile() {
         archive)      PRESET="slow";      CRF=18 ;;  # 收藏归档: 质量优先
         balanced)     PRESET="fast";      CRF=20 ;;  # 日常使用: 速度质量平衡
         fast)         PRESET="ultrafast"; CRF=14 ;;  # 快速处理: 最快，文件较大
-        max-compress) PRESET="slow";      CRF=24 ;;  # 极限压缩: 最小体积
-        *) echo "[错误] 未知 profile: $profile (可选: archive, balanced, fast, max-compress)"; exit 1 ;;
+        maxcompress) PRESET="slow";      CRF=24 ;;  # 极限压缩: 最小体积
+        *) echo "[错误] 未知 profile: $profile (可选: archive, balanced, fast, maxcompress)"; exit 1 ;;
     esac
 }
 
