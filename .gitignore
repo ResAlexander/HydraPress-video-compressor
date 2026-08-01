@@ -7,6 +7,9 @@ gitignore_Video/*
 # 内部调试草稿 (不发布)
 debug_drafts/*
 
+# 本地 AI 助手配置 (不发布)
+AGENTS.md
+
 # 工具缓存
 .ab-av1-*/
 

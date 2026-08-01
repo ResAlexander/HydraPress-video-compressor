@@ -215,48 +215,56 @@ if [ -z "$INPUT_DIR" ]; then
     exit 1
 fi
 
-if [ ! -d "$INPUT_DIR" ]; then
+if [ ! -e "$INPUT_DIR" ]; then
     echo "[错误] 源目录不存在: $INPUT_DIR"
+    exit 1
+elif [ ! -d "$INPUT_DIR" ]; then
+    echo "[错误] 源路径不是目录: $INPUT_DIR"
+    echo "  -i 需要指定一个包含视频的文件夹，而不是单个文件"
     exit 1
 fi
 
-# 规范化: 去除尾部斜杠，便于后续相对路径计算
-INPUT_DIR="${INPUT_DIR%/}"
-[ -z "$INPUT_DIR" ] && INPUT_DIR="/"
+# 规范化为绝对物理路径: 统一 -i==-o 判定、相对路径计算、以及排除输出目录
+INPUT_DIR=$(cd "$INPUT_DIR" && pwd -P)
 
 # 输出目录默认为 源目录名_compressed
 if [ -z "$OUTPUT_DIR" ]; then
-    OUTPUT_DIR="${INPUT_DIR%/}_compressed"
+    OUTPUT_DIR="${INPUT_DIR}_compressed"
 fi
 
-# 拒绝 -i 与 -o 指向同一目录 (否则源文件会被当作已存在输出而全部跳过)
-in_abs=$(cd "$INPUT_DIR" 2>/dev/null && pwd)
-if [ -d "$OUTPUT_DIR" ]; then
-    out_abs=$(cd "$OUTPUT_DIR" 2>/dev/null && pwd)
-else
-    out_parent=$(dirname "$OUTPUT_DIR")
-    out_base=$(basename "$OUTPUT_DIR")
-    out_abs=$(cd "$out_parent" 2>/dev/null && pwd)/$out_base
+# 创建并规范化输出目录
+if ! mkdir -p "$OUTPUT_DIR" 2>/dev/null; then
+    echo "[错误] 无法创建输出目录: $OUTPUT_DIR"
+    exit 1
 fi
-if [ "$in_abs" = "$out_abs" ]; then
+OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd -P)
+
+# 拒绝 -i 与 -o 指向同一目录 (否则源文件会被当作已存在输出而全部跳过)
+if [ "$INPUT_DIR" = "$OUTPUT_DIR" ]; then
     echo "[错误] 输出目录不能与源目录相同: $INPUT_DIR"
     echo "  请用 -o 指定不同的输出目录"
     exit 1
 fi
 
-mkdir -p "$OUTPUT_DIR"
-
 # ---------- 扫描源文件 ----------
 # 用 find + print0 安全处理含空格的文件名
+# -H: 跟随命令行上指定的符号链接 (支持把符号链接目录作为 -i 输入), 但不跟随遍历中遇到的符号链接
+# 若输出目录位于源目录内 (如 -i ./v -o ./v/out), 必须排除其下文件,
+# 否则 --subdirs 会把已压缩产物当作源文件重复处理
 find_args=("$INPUT_DIR")
 if [ "$SUB_DIRS" = false ]; then
     find_args+=("-maxdepth" "1")
 fi
+case "$OUTPUT_DIR" in
+    "$INPUT_DIR"/*)
+        find_args+=("-not" "-path" "$OUTPUT_DIR/*")
+        ;;
+esac
 
 files=()
 while IFS= read -r -d '' f; do
     files+=("$f")
-done < <(find "${find_args[@]}" -type f -name "$FILE_PATTERN" -print0)
+done < <(find -H "${find_args[@]}" -type f -name "$FILE_PATTERN" -print0)
 
 total=${#files[@]}
 
@@ -354,8 +362,13 @@ for f in "${files[@]}"; do
     # -pix_fmt       根据 --bit 参数选择 (8=yuv420p, 10=yuv420p10le, etc.)
     # -progress pipe:1  输出实时进度
     # 先写入 .part 临时文件, 成功后原子重命名, 避免中断残留被误判为已完成
-    # 保留原扩展名，使 ffmpeg 能据扩展名推断输出容器格式
-    output_part="${output%.*}.part.${output##*.}"
+    # 保留原扩展名，使 ffmpeg 能据扩展名推断输出容器格式；
+    # 无扩展名文件 (如以 -f "*" 匹配) 回退到 .part.mp4，确保格式可推断
+    if [[ "$filename" == *.* ]]; then
+        output_part="${output%.*}.part.${output##*.}"
+    else
+        output_part="${output}.part.mp4"
+    fi
     err_log=$(mktemp)
     nice -n "$NICE_LEVEL" ffmpeg -y -i "$f" \
         -c:v libx265 \
@@ -369,7 +382,6 @@ for f in "${files[@]}"; do
         frame_cur=0
         fps_val=""
         bitrate_val=""
-        size_val=""
         while IFS= read -r line; do
             case "$line" in
                 frame=*)
@@ -403,13 +415,9 @@ for f in "${files[@]}"; do
                 bitrate=*)
                     bitrate_val="${line#bitrate=}"
                     ;;
-                total_size=*)
-                    size_val="${line#total_size=}"
-                    ;;
             esac
         done
         printf "\n"
-        [ -n "$size_val" ] && echo "  total_size=${size_val}"
         true
     }
     ffmpeg_status=$?
