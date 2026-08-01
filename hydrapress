@@ -201,6 +201,19 @@ detect_source_bit_depth() {
     esac
 }
 
+# 跨平台获取文件大小 (字节)
+#   macOS (BSD): stat -f%z
+#   Linux (GNU): stat -c%s
+#   兜底: wc -c (POSIX，Windows Git Bash/WSL 亦可)
+file_size() {
+    local f=$1
+    case "$OS_TYPE" in
+        macos) stat -f%z "$f" 2>/dev/null || wc -c < "$f" ;;
+        linux) stat -c%s "$f" 2>/dev/null || wc -c < "$f" ;;
+        *)     wc -c < "$f" ;;
+    esac
+}
+
 # 格式化文件大小为可读字符串 (字节 → KB/MB/GB)
 human_size() {
     local bytes=$1
@@ -353,7 +366,7 @@ for f in "${files[@]}"; do
     fi
 
     # 统计输入文件大小
-    input_size=$(stat -f%z "$f")
+    input_size=$(file_size "$f")
     input_size_str=$(human_size "$input_size")
 
     echo "[$(date '+%H:%M:%S')] [$((processed + skipped + failed + 1))/$total] 处理: $filename ($input_size_str)"
@@ -455,7 +468,7 @@ for f in "${files[@]}"; do
         rm -f "$err_log"
         processed=$((processed + 1))
         total_input_size=$((total_input_size + input_size))
-        output_size=$(stat -f%z "$output")
+        output_size=$(file_size "$output")
         total_output_size=$((total_output_size + output_size))
 
         # 计算节省比例

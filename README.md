@@ -1,9 +1,12 @@
 # hydrapress — 跨平台 HEVC 视频批量压缩工具
 
 > 将手机拍摄的 H.264 视频批量压缩为 HEVC（H.265），在保持高画质的前提下大幅减小文件体积
+>
+> 支持平台：macOS · Windows (WSL2 / Git Bash) · Linux
 
 [![macOS](https://img.shields.io/badge/-macOS-lightgrey.svg?logo=macos&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Linux](https://img.shields.io/badge/-Linux-orange.svg?logo=linux&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
+[![Windows](https://img.shields.io/badge/-Windows-blue.svg?logo=windows&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
 [![ffmpeg](https://img.shields.io/badge/ffmpeg-5.1.2-green.svg)](https://img.shields.io/badge/bash-lightgrey.svg)
 
 **特点**  
@@ -20,18 +23,35 @@
 
 ```bash
 # 1. 安装依赖（已安装可跳过）
-brew install ffmpeg           # macOS
-sudo apt install ffmpeg bc    # Debian/Ubuntu
+brew install ffmpeg                    # macOS
+sudo apt install ffmpeg bc             # Debian / Ubuntu
+sudo dnf install ffmpeg bc             # Fedora / RHEL / CentOS
 
-# 2. 下载并授予权
+# 2. 下载脚本并授予执行权限
 chmod +x hydrapress
 
-# 3. 查看配置
 # 3. 开始压缩（推荐配置）
 ./hydrapress -i ./Video --profile balanced
 ```
 
 运行完成后，压缩后的视频会出现在 `./Video_compressed/` 目录。
+
+### Windows (WSL2 / Git Bash)
+
+本工具为 Bash 脚本，Windows 请通过 **WSL2** 或 **Git Bash** 运行（原生 CMD / PowerShell 不支持）：
+
+```bash
+# 方式一: WSL2 (推荐) —— 进入 Linux 子系统后与 Linux 用法一致
+#   在 WSL 内: sudo apt install ffmpeg bc
+#   访问 Windows 视频: /mnt/c/Users/<你的用户名>/Videos
+./hydrapress -i /mnt/c/Users/you/Videos --profile balanced
+
+# 方式二: Git Bash —— 需先自行安装 ffmpeg 与 bc，
+#   且脚本会以 wc -c 兜底获取文件大小，功能完整
+./hydrapress -i ./Video --profile balanced
+```
+
+> 提示: 在 Git Bash 中 `nice` 默认不可用，`-n` 参数会被忽略；WSL2 中则正常生效。
 
 ---
 
