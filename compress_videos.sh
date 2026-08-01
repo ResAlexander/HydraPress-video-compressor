@@ -84,16 +84,25 @@ show_full_guide() {
     cat "$SCRIPT_DIR/help_full.txt"
 }
 
+# 需要带值的参数统一做缺值校验，避免 set -u 触发 unbound variable
+need_arg() {
+    if [ $# -lt 2 ]; then
+        echo "[错误] $1 需要一个参数值"
+        echo "运行 -h 查看快速帮助，--help 查看完整说明"
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -i|--input)   INPUT_DIR="$2";    shift 2 ;;
-        -o|--output)  OUTPUT_DIR="$2";   shift 2 ;;
-        --profile)    PROFILE="$2";      shift 2 ;;
-        -c|--crf)     CRF="$2";          shift 2 ;;
-        -p|--preset)  PRESET="$2";       shift 2 ;;
-        -n|--nice)    NICE_LEVEL="$2";   shift 2 ;;
-        -f|--filter)  FILE_PATTERN="$2"; shift 2 ;;
-        -b|--bit)     BIT_DEPTH="$2";    shift 2 ;;
+        -i|--input)   need_arg "$@"; INPUT_DIR="$2";    shift 2 ;;
+        -o|--output)  need_arg "$@"; OUTPUT_DIR="$2";   shift 2 ;;
+        --profile)    need_arg "$@"; PROFILE="$2";      shift 2 ;;
+        -c|--crf)     need_arg "$@"; CRF="$2";          shift 2 ;;
+        -p|--preset)  need_arg "$@"; PRESET="$2";       shift 2 ;;
+        -n|--nice)    need_arg "$@"; NICE_LEVEL="$2";   shift 2 ;;
+        -f|--filter)  need_arg "$@"; FILE_PATTERN="$2"; shift 2 ;;
+        -b|--bit)     need_arg "$@"; BIT_DEPTH="$2";    shift 2 ;;
         --subdirs)    SUB_DIRS=true;     shift ;;
         --no-notify)  NOTIFICATION=false; shift ;;
         -h)           show_help; exit 0 ;;
@@ -128,6 +137,34 @@ validate_bit_depth() {
     esac
 }
 
+# 检查 CRF 是否为 0-51 的整数
+validate_crf() {
+    case "$CRF" in
+        ''|*[!0-9]*) echo "[错误] CRF 必须是 0-51 的整数 (当前: $CRF)"; exit 1 ;;
+    esac
+    if [ "$CRF" -lt 0 ] || [ "$CRF" -gt 51 ]; then
+        echo "[错误] CRF 超出范围 0-51 (当前: $CRF)"; exit 1
+    fi
+}
+
+# 检查 preset 是否合法
+validate_preset() {
+    case "$PRESET" in
+        ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|placebo) ;;
+        *) echo "[错误] 未知 preset: $PRESET (可选: ultrafast ~ placebo)"; exit 1 ;;
+    esac
+}
+
+# 检查 nice 是否为 0-19 的整数
+validate_nice() {
+    case "$NICE_LEVEL" in
+        ''|*[!0-9]*) echo "[错误] nice 必须是 0-19 的整数 (当前: $NICE_LEVEL)"; exit 1 ;;
+    esac
+    if [ "$NICE_LEVEL" -lt 0 ] || [ "$NICE_LEVEL" -gt 19 ]; then
+        echo "[错误] nice 超出范围 0-19 (当前: $NICE_LEVEL)"; exit 1
+    fi
+}
+
 # 色深 → ffmpeg pixel format
 pix_fmt_for_bit_depth() {
     local depth=$1
@@ -155,19 +192,19 @@ detect_source_bit_depth() {
 human_size() {
     local bytes=$1
     if [ "$bytes" -gt 1073741824 ]; then
-        echo "scale=1; $bytes / 1073741824" | bc
-        echo " GB"
+        echo "$(echo "scale=1; $bytes / 1073741824" | bc) GB"
     elif [ "$bytes" -gt 1048576 ]; then
-        echo "scale=1; $bytes / 1048576" | bc
-        echo " MB"
+        echo "$(echo "scale=1; $bytes / 1048576" | bc) MB"
     else
-        echo "scale=1; $bytes / 1024" | bc
-        echo " KB"
+        echo "$(echo "scale=1; $bytes / 1024" | bc) KB"
     fi
 }
 
 check_deps
 validate_bit_depth
+validate_crf
+validate_preset
+validate_nice
 
 # 阻止系统休眠 (caffeinate 在后台运行，脚本退出时自动结束)
 caffeinate -i -w $$ &
@@ -183,9 +220,28 @@ if [ ! -d "$INPUT_DIR" ]; then
     exit 1
 fi
 
+# 规范化: 去除尾部斜杠，便于后续相对路径计算
+INPUT_DIR="${INPUT_DIR%/}"
+[ -z "$INPUT_DIR" ] && INPUT_DIR="/"
+
 # 输出目录默认为 源目录名_compressed
 if [ -z "$OUTPUT_DIR" ]; then
     OUTPUT_DIR="${INPUT_DIR%/}_compressed"
+fi
+
+# 拒绝 -i 与 -o 指向同一目录 (否则源文件会被当作已存在输出而全部跳过)
+in_abs=$(cd "$INPUT_DIR" 2>/dev/null && pwd)
+if [ -d "$OUTPUT_DIR" ]; then
+    out_abs=$(cd "$OUTPUT_DIR" 2>/dev/null && pwd)
+else
+    out_parent=$(dirname "$OUTPUT_DIR")
+    out_base=$(basename "$OUTPUT_DIR")
+    out_abs=$(cd "$out_parent" 2>/dev/null && pwd)/$out_base
+fi
+if [ "$in_abs" = "$out_abs" ]; then
+    echo "[错误] 输出目录不能与源目录相同: $INPUT_DIR"
+    echo "  请用 -o 指定不同的输出目录"
+    exit 1
 fi
 
 mkdir -p "$OUTPUT_DIR"
@@ -235,7 +291,14 @@ failed=0
 # ---------- 逐个处理 ----------
 for f in "${files[@]}"; do
     filename=$(basename "$f")
-    output="$OUTPUT_DIR/$filename"
+    # --subdirs 时按相对路径重建目录结构，避免不同子目录同名文件互相覆盖
+    if [ "$SUB_DIRS" = true ]; then
+        rel=${f#"$INPUT_DIR"/}
+        output="$OUTPUT_DIR/$rel"
+        mkdir -p "$(dirname "$output")"
+    else
+        output="$OUTPUT_DIR/$filename"
+    fi
 
     # 跳过已存在的输出文件 (支持中断后恢复)
     if [ -f "$output" ]; then
@@ -244,12 +307,21 @@ for f in "${files[@]}"; do
         continue
     fi
 
+    # 检查源文件是否含视频流 (无视频流直接跳过，避免被误判为压缩成功)
+    streams_info=$(ffprobe -v error -show_entries stream=codec_type \
+        -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        case "$streams_info" in
+            *video*) ;;
+            *) echo "[$(date '+%H:%M:%S')] 跳过: $filename (无视频流)"; skipped=$((skipped + 1)); continue ;;
+        esac
+    fi
+
     # 统计输入文件大小
     input_size=$(stat -f%z "$f")
-    total_input_size=$((total_input_size + input_size))
     input_size_str=$(human_size "$input_size")
 
-    echo "[$(date '+%H:%M:%S')] [$((processed + skipped + 1))/$total] 处理: $filename ($input_size_str)"
+    echo "[$(date '+%H:%M:%S')] [$((processed + skipped + failed + 1))/$total] 处理: $filename ($input_size_str)"
 
     # ---------- 确定 pixel format ----------
     if [ "$BIT_DEPTH" = "auto" ]; then
@@ -281,7 +353,10 @@ for f in "${files[@]}"; do
     # -c:a copy      音频直接复制，不重新编码
     # -pix_fmt       根据 --bit 参数选择 (8=yuv420p, 10=yuv420p10le, etc.)
     # -progress pipe:1  输出实时进度
-    set +e
+    # 先写入 .part 临时文件, 成功后原子重命名, 避免中断残留被误判为已完成
+    # 保留原扩展名，使 ffmpeg 能据扩展名推断输出容器格式
+    output_part="${output%.*}.part.${output##*.}"
+    err_log=$(mktemp)
     nice -n "$NICE_LEVEL" ffmpeg -y -i "$f" \
         -c:v libx265 \
         -preset "$PRESET" \
@@ -290,7 +365,7 @@ for f in "${files[@]}"; do
         -tag:v hvc1 \
         -c:a copy \
         -progress pipe:1 \
-        "$output" 2>&1 | {
+        "$output_part" 2>"$err_log" | {
         frame_cur=0
         fps_val=""
         bitrate_val=""
@@ -335,13 +410,16 @@ for f in "${files[@]}"; do
         done
         printf "\n"
         [ -n "$size_val" ] && echo "  total_size=${size_val}"
+        true
     }
     ffmpeg_status=$?
-    set -e
 
     # ---------- 处理结果 ----------
-    if [ $ffmpeg_status -eq 0 ] && [ -f "$output" ]; then
+    if [ $ffmpeg_status -eq 0 ] && [ -f "$output_part" ]; then
+        mv "$output_part" "$output"
+        rm -f "$err_log"
         processed=$((processed + 1))
+        total_input_size=$((total_input_size + input_size))
         output_size=$(stat -f%z "$output")
         total_output_size=$((total_output_size + output_size))
 
@@ -353,8 +431,11 @@ for f in "${files[@]}"; do
     else
         failed=$((failed + 1))
         echo "  失败: $filename"
+        # 透出 ffmpeg 错误原因 (末尾若干行) 便于排查
+        [ -s "$err_log" ] && tail -n 8 "$err_log" | sed 's/^/    /' >&2
         # 只删除失败产生的残余文件，绝不触碰源文件
-        [ -f "$output" ] && rm "$output"
+        [ -f "$output_part" ] && rm "$output_part"
+        rm -f "$err_log"
     fi
     echo ""
 done
@@ -372,8 +453,8 @@ echo "  完成:   $processed 个"
 echo "  跳过:   $skipped 个"
 echo "  失败:   $failed 个"
 if [ -n "$total_savings" ]; then
-    echo "  压缩前: $(echo "scale=2; $total_input_size / 1073741824" | bc | sed 's/^\./0./') GB"
-    echo "  压缩后: $(echo "scale=2; $total_output_size / 1073741824" | bc | sed 's/^\./0./') GB"
+    echo "  压缩前: $(human_size "$total_input_size")"
+    echo "  压缩后: $(human_size "$total_output_size")"
     echo "  节省:   ${total_savings}%"
 fi
 echo "=========================================="
@@ -390,3 +471,7 @@ fi
 
 echo ""
 echo "输出目录: $OUTPUT_DIR"
+
+# 有失败时以非零退出码返回，便于脚本/CI 判断
+[ "$failed" -gt 0 ] && exit 1
+exit 0

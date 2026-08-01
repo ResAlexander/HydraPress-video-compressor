@@ -1,10 +1,17 @@
+# 视频源与压缩产物 (勿提交大文件)
 [Vv]ideo/*
 [Vv]ideo_compressed/*
+gitignore_Video/*
 .videocache/*
-*.log
 
-.gitignore*
-gitignore*
-.*
-
+# 内部调试草稿 (不发布)
 debug_drafts/*
+
+# 工具缓存
+.ab-av1-*/
+
+# 系统 / 编辑器
+.DS_Store
+
+# 日志
+*.log

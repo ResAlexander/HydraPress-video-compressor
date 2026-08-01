@@ -187,8 +187,7 @@ Doom9 论坛和 x265 官方文档均确认了这一行为。
 - 测试视频：3 段 OPPO 手机录制视频（H.264, 1080p, ~16.3-16.4 Mbps, yuv420p 8-bit）
 - 编码器：libx265 (ffmpeg 5.1.2)
 - 测试矩阵：3 视频 × (ultrafast 7 CRF + veryfast 2 + fast 2 + slow 6) = 51 次编码
-- 数据文件：`debug_drafts/testtmp/bench_curve_results.csv`
-- 完整 JSON：`debug_drafts/testtmp/bench_data.json`
+- 原始测试数据为内部资料，未随仓库发布
 
 ### 局限性
 1. 测试仅覆盖 OPPO 手机 H.264 源视频，其他源类型（蓝光、4K、动画等）可能表现不同
