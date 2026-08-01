@@ -1,15 +1,16 @@
-# hydrapress — 跨平台 HEVC 视频批量压缩工具
+# Hydrapress — 跨平台 HEVC 视频批量压缩工具
 
-> 将手机拍摄的 H.264 视频批量压缩为 HEVC（H.265），在保持高画质的前提下大幅减小文件体积
->
+> 十分适用于个人在电脑上压缩视频。  
+
+将 H.264 视频批量压缩为 HEVC (H.265)，保持高画质的同时，大幅减小文件体积。
+<!--
 > 支持平台：macOS · Windows (WSL2 / Git Bash) · Linux
-
+-->
 [![macOS](https://img.shields.io/badge/-macOS-lightgrey.svg?logo=macos&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Linux](https://img.shields.io/badge/-Linux-orange.svg?logo=linux&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Windows](https://img.shields.io/badge/-Windows-blue.svg?logo=windows&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
 [![ffmpeg](https://img.shields.io/badge/ffmpeg-5.1.2-green.svg)](https://img.shields.io/badge/bash-lightgrey.svg)
-
-**特点**  
+ 
 - 🚀 批量处理，断点续传，后台运行  
 - 🔒 源文件零风险，永不修改或删除）  
 - ⚡ 原文件写入 .part 临时文件，中断恢复安全  
@@ -26,6 +27,7 @@
 brew install ffmpeg                    # macOS
 sudo apt install ffmpeg bc             # Debian / Ubuntu
 sudo dnf install ffmpeg bc             # Fedora / RHEL / CentOS
+# Windows 用户见下方 WSL2 / Git Bash
 
 # 2. 下载脚本并授予执行权限
 chmod +x hydrapress
@@ -51,7 +53,7 @@ chmod +x hydrapress
 ./hydrapress -i ./Video --profile balanced
 ```
 
-> 提示: 在 Git Bash 中 `nice` 默认不可用，`-n` 参数会被忽略；WSL2 中则正常生效。
+> Note: 在 Git Bash 中 `nice` 默认不可用，`-n` 参数会被忽略；WSL2 中则正常生效。
 
 ---
 
@@ -66,7 +68,7 @@ chmod +x hydrapress
 | `-p, --preset` | `slow` | 编码预设 |
 | `-n, --nice` | `10` | 进程优先级（0=正常，19=最低） |
 | `-f, --filter` | `*.mp4` | 文件匹配模式 |
-| `-b, --bit` | `auto` | 色深（8/10/12/auto） |
+| `-b, --bit` | `auto` | 色深（8/10/12/auto），建议auto |
 | `--subdirs` | - | 递归处理子目录 |
 | `--no-notify` | - | 禁用完成通知 |
 
@@ -79,7 +81,7 @@ chmod +x hydrapress
 | `fast` | ultrafast | 14 | 快速处理，文件较大 | 60-95% 源体积 |
 | `maxcompress` | slow | 24 | 极限压缩，可见画质损失 | 20-35% 源体积 |
 
-> 基于 ~16Mbps OPPO 手机视频实测数据，实际效果因内容而异。
+* 基于 ~16Mbps OPPO A9 拍摄视频实测数据，实际效果因内容而异。
 
 ---
 
@@ -135,17 +137,15 @@ chmod +x hydrapress
 源目录 (Videos/)
   ├── 2024-08-01.mp4  ──→  压缩 →  ┌── 输出目录 (Videos_compressed/)
   ├── 2024-08-02.mp4  ──→  压缩 →      │   ├── 2024-08-01.mp4
-  └── ...                           │   └── 2024-08-02.mp4
+  └── ...                             │   └── 2024-08-02.mp4
 ```
-
-- 源文件从未被修改或删除
-- 已存在的输出文件自动跳过（断点续传）
-- Ctrl+C 中断 → 重跑继续未完成文件
+<!--
+- 源文件从未被修改或删除；已存在的输出文件自动跳过（断点续传）。
 - 以降低系统优先级运行，不干扰前台操作
-
+-->
 ---
 
-## 故障排除
+## FAQs
 
 **Q: 运行一半关机了怎么办？**  
 直接重新运行脚本，已压缩文件会被自动跳过，只处理未完成的。
@@ -171,6 +171,7 @@ x265 的 `slow` 在相同 CRF 下文件更大但质量略好（SSIM +0.004），
 
 ## 测试记录
 
+此测试记录与x265_encoding_guide.md中的测试无关。这是两场测试
 | 项目 | 值 |
 |------|-----|
 | **机型** | MacBook Pro 15" 2015 |
@@ -192,7 +193,7 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 ---
 
-## 技术文档
+## 相关文档
 
-- [x265 编码指南：Preset、CRF、内容类型与输出结果](x265_encoding_guide.md)
+- [x265 编码指南：Preset、CRF、内容类型与实验结果](x265_encoding_guide.md)
 - [快速帮助](`-h`) 与 [完整说明](`--help`) 可在终端查看
