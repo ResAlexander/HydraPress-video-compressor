@@ -1,5 +1,5 @@
 ┌──────────────────────────────────────────────────────────────┐
-│  compress_videos.sh — 视频批量压缩工具                       │
+│  hydrapress — 视频批量压缩工具                       │
 └──────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -23,7 +23,7 @@
 
   复制以下命令，按需修改括号中的值，粘贴到终端执行:
 
-  ./compress_videos.sh \
+  ./hydrapress \
     -i "(填入 源视频文件夹路径)" \
     -o "(填入 输出文件夹路径)" \
     -c (填入 CRF质量值) \
@@ -143,8 +143,8 @@
     maxcompress → 约 20-35% 源体积, SSIM ~0.982, 耗时 3×
 
   示例:
-    ./compress_videos.sh -i ./Video --profile archive --subdirs
-    ./compress_videos.sh -i ./Video --profile balanced -b auto
+    ./hydrapress -i ./Video --profile archive --subdirs
+    ./hydrapress -i ./Video --profile balanced -b auto
 
   注意: 也可不用 profile，直接用 -c 和 -p 自由组合。
         详见 x265_encoding_guide.md 了解如何自行选择参数。
@@ -188,19 +188,19 @@
   如果懒得读上方指南，可直接使用 profile 一键启动：
 
   # 日常使用 (推荐) — 速度与质量平衡
-  ./compress_videos.sh -i "./Video" --profile balanced --subdirs
+  ./hydrapress -i "./Video" --profile balanced --subdirs
 
   # 收藏归档 — 质量优先，速度较慢
-  ./compress_videos.sh -i "./Video" --profile archive --subdirs
+  ./hydrapress -i "./Video" --profile archive --subdirs
 
   # 快速处理 — 最快速度
-  ./compress_videos.sh -i "./Video" --profile fast --subdirs
+  ./hydrapress -i "./Video" --profile fast --subdirs
 
   # 极限压缩 — 最小体积
-  ./compress_videos.sh -i "./Video" --profile maxcompress --subdirs
+  ./hydrapress -i "./Video" --profile maxcompress --subdirs
 
   # 完全自定义
-  ./compress_videos.sh \
+  ./hydrapress \
     -i "./Video" \
     -o "./Video_compressed" \
     -c 20 \

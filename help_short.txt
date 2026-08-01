@@ -1,4 +1,4 @@
-用法: ./compress_videos.sh -i 源目录 [选项]
+用法: ./hydrapress -i 源目录 [选项]
 
 参数速查:
   -i  DIR    源视频目录 (必填)
@@ -20,10 +20,10 @@
 
 示例:
   # 一键配置 — 日常使用 (推荐)
-  ./compress_videos.sh -i ./Video --profile balanced
+  ./hydrapress -i ./Video --profile balanced
 
   # 收藏归档 — 质量优先
-  ./compress_videos.sh -i ./Video --profile archive --subdirs
+  ./hydrapress -i ./Video --profile archive --subdirs
 
   # 手动指定参数
-  ./compress_videos.sh -i ./Video -c 18 -p slow -b auto --subdirs
+  ./hydrapress -i ./Video -c 18 -p slow -b auto --subdirs

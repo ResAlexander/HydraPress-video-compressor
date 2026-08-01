@@ -1,8 +1,9 @@
-# compress_videos.sh — macOS 下 HEVC 视频批量压缩工具
+# hydrapress — 跨平台 HEVC 视频批量压缩工具
 
 > 将手机拍摄的 H.264 视频批量压缩为 HEVC（H.265），在保持高画质的前提下大幅减小文件体积
 
 [![macOS](https://img.shields.io/badge/-macOS-lightgrey.svg?logo=macos&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
+[![Linux](https://img.shields.io/badge/-Linux-orange.svg?logo=linux&logoWidth=14)](https://img.shields.io/badge/license-MIT-blue.svg)
 [![ffmpeg](https://img.shields.io/badge/ffmpeg-5.1.2-green.svg)](https://img.shields.io/badge/bash-lightgrey.svg)
 
 **特点**  
@@ -19,14 +20,15 @@
 
 ```bash
 # 1. 安装依赖（已安装可跳过）
-brew install ffmpeg
+brew install ffmpeg           # macOS
+sudo apt install ffmpeg bc    # Debian/Ubuntu
 
 # 2. 下载并授予权
-chmod +x compress_videos.sh
+chmod +x hydrapress
 
 # 3. 查看配置
 # 3. 开始压缩（推荐配置）
-./compress_videos.sh -i ./Video --profile balanced
+./hydrapress -i ./Video --profile balanced
 ```
 
 运行完成后，压缩后的视频会出现在 `./Video_compressed/` 目录。
@@ -90,19 +92,19 @@ chmod +x compress_videos.sh
 
 ```bash
 # 收藏归档（质量优先）
-./compress_videos.sh -i ./Videos --profile archive --subdirs
+./hydrapress -i ./Videos --profile archive --subdirs
 
 # 快速处理（时间优先）
-./compress_videos.sh -i ./Videos --profile fast
+./hydrapress -i ./Videos --profile fast
 
 # 极限压缩（空间优先）
-./compress_videos.sh -i ./Videos --profile maxcompress
+./hydrapress -i ./Videos --profile maxcompress
 
 # 自定义参数
-./compress_videos.sh -i ./Videos -o ./Compressed -c 18 -p medium --subdirs
+./hydrapress -i ./Videos -o ./Compressed -c 18 -p medium --subdirs
 
 # 仅处理特定文件
-./compress_videos.sh -i ./Videos -f "REC*.mp4"
+./hydrapress -i ./Videos -f "REC*.mp4"
 ```
 
 ---

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-#  compress_videos.sh — 视觉无损视频批量压缩工具
+#  HydraPress — 视觉无损视频批量压缩工具
 #
 #  用途: 扫描指定目录，将 H.264 视频批量转码为 HEVC (H.265)
 #        在视觉无损的前提下大幅减小文件体积
@@ -9,17 +9,17 @@
 #    - 输出到独立目录，永不修改/删除源文件
 #    - 已压缩文件自动跳过，支持中断后恢复
 #    - nice 降低系统优先级，后台运行不干扰前台
-#    - caffeinate 阻止系统休眠
-#    - 完成后 macOS 弹窗通知
+#    - 自动阻止系统休眠 (macOS: caffeinate / Linux: systemd-inhibit)
+#    - 完成后系统通知 (macOS: osascript / Linux: notify-send)
 #
 #  用法:
-#    chmod +x compress_videos.sh
-#    ./compress_videos.sh              # 使用下方默认配置
-#    ./compress_videos.sh -i /path/in  # 命令行覆盖输入目录
-#    ./compress_videos.sh -i /in -o /out -c 22 -p fast
-#    ./compress_videos.sh -i /in --profile balanced
+#    chmod +x hydrapress
+#    ./hydrapress              # 使用下方默认配置
+#    ./hydrapress -i /path/in  # 命令行覆盖输入目录
+#    ./hydrapress -i /in -o /out -c 22 -p fast
+#    ./hydrapress -i /in --profile balanced
 #
-#  依赖: ffmpeg, bc (macOS 自带), nice, caffeinate
+#  依赖: ffmpeg, bc (macOS 自带，Linux 需安装), nice
 # ============================================================
 
 set -uo pipefail
@@ -50,7 +50,7 @@ NICE_LEVEL=10                                   # nice 优先级: 0=正常，10=
 FILE_PATTERN="*.mp4"                            # 源文件名匹配模式
 BIT_DEPTH="auto"                                # 色深: 8/10/12/auto (默认 auto 跟随源文件)
 SUB_DIRS=false                                  # 是否递归处理子目录
-NOTIFICATION=true                               # 完成后弹出 macOS 通知
+NOTIFICATION=true                               # 完成后弹出系统通知 (Linux 无 notify-send 时静默跳过)
 
 # ---------- Profile 定义 ----------
 # 每个 profile 是 "preset:crf" 的组合，基于实测数据 (见 x265_encoding_guide.md)
@@ -118,13 +118,26 @@ if [ -n "$PROFILE" ]; then
 fi
 
 # ---------- 前置检查 ----------
+# 平台检测:
+#   macOS: caffeinate + osascript
+#   Linux: systemd-inhibit + notify-send (存在时使用，否则自动跳过)
+case "$(uname -s)" in
+    Darwin) OS_TYPE="macos" ;;
+    Linux)  OS_TYPE="linux" ;;
+    *)      OS_TYPE="other" ;;
+esac
+
 check_deps() {
     local missing=()
     command -v ffmpeg >/dev/null 2>&1 || missing+=("ffmpeg")
     command -v bc     >/dev/null 2>&1 || missing+=("bc")
     if [ ${#missing[@]} -gt 0 ]; then
         echo "[错误] 缺少依赖: ${missing[*]}"
-        echo "  macOS: brew install ${missing[*]}"
+        case "$OS_TYPE" in
+            macos) echo "  macOS: brew install ${missing[*]}" ;;
+            linux) echo "  Debian/Ubuntu: sudo apt install ${missing[*]}    RedHat: sudo dnf install ${missing[*]}" ;;
+            *)     echo "  请通过你的包管理器安装: ${missing[*]}" ;;
+        esac
         exit 1
     fi
 }
@@ -206,8 +219,22 @@ validate_crf
 validate_preset
 validate_nice
 
-# 阻止系统休眠 (caffeinate 在后台运行，脚本退出时自动结束)
-caffeinate -i -w $$ &
+# ---------- 阻止系统休眠 ----------
+# macOS: caffeinate -w $$ 会随脚本退出自动结束
+# Linux: systemd-inhibit 后台持有锁，脚本退出时由 EXIT trap 清理
+INHIBIT_PID=""
+case "$OS_TYPE" in
+    macos)
+        caffeinate -i -w $$ &
+        ;;
+    linux)
+        if command -v systemd-inhibit >/dev/null 2>&1; then
+            systemd-inhibit --what=idle:sleep --who=hydrapress --why="视频批量压缩中" sleep infinity &
+            INHIBIT_PID=$!
+        fi
+        ;;
+esac
+trap '[ -n "$INHIBIT_PID" ] && kill "$INHIBIT_PID" 2>/dev/null' EXIT
 
 # ---------- 目录校验 ----------
 if [ -z "$INPUT_DIR" ]; then
@@ -467,14 +494,24 @@ if [ -n "$total_savings" ]; then
 fi
 echo "=========================================="
 
-# ---------- macOS 通知 ----------
+# ---------- 系统通知 ----------
+# macOS: osascript; Linux: notify-send (未安装时静默跳过)
 if [ "$NOTIFICATION" = true ] && [ "$processed" -gt 0 ]; then
     msg="视频压缩完成"
     [ "$skipped" -gt 0 ] && msg="$msg (${skipped}个跳过)"
     [ "$failed" -gt 0 ]  && msg="$msg (${failed}个失败)"
     msg="$msg (共${processed}个)"
 
-    osascript -e "display notification \"${msg}\" with title \"视频压缩\" sound name \"Ping\""
+    case "$OS_TYPE" in
+        macos)
+            osascript -e "display notification \"${msg}\" with title \"视频压缩\" sound name \"Ping\"" 2>/dev/null
+            ;;
+        linux)
+            if command -v notify-send >/dev/null 2>&1; then
+                notify-send "视频压缩完成" "$msg"
+            fi
+            ;;
+    esac
 fi
 
 echo ""

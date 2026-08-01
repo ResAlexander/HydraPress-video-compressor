@@ -1,7 +1,7 @@
 # 视频源与压缩产物 (勿提交大文件)
 [Vv]ideo/*
 [Vv]ideo_compressed/*
-gitignore_Video/*
+gitignore_*
 .videocache/*
 
 # 内部调试草稿 (不发布)
