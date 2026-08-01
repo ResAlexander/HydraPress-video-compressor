@@ -6,3 +6,5 @@
 .gitignore*
 gitignore*
 .*
+
+debug_drafts/*

@@ -3,8 +3,14 @@
 参数速查:
   -i  DIR    源视频目录 (必填)
   -o  DIR    输出目录 (默认: 源目录_compressed)
+  --profile  一键配置 (覆盖 -c 和 -p):
+               archive      slow+CRF18   收藏归档，质量优先
+               balanced     fast+CRF20   日常使用，速度质量平衡 (推荐)
+               fast         ultrafast+CRF14  快速处理，文件较大
+               max-compress slow+CRF24   极限压缩，可见画质损失
   -c  NUM    CRF 质量值 (默认: 22，越小质量越高)
   -p  NAME   编码预设   (默认: slow)
+               注意: x265 中越慢文件越大但质量越好 (与 x264 相反)
   -n  NUM    nice优先级 (默认: 10，0=正常 19=最低)
   -f  PAT    文件匹配   (默认: "*.mp4")
   -b  DEPTH  色深       (默认: auto，跟随源文件；可选: 8, 10, 12)
@@ -13,14 +19,11 @@
   --help                查看完整说明 (含概念解释)
 
 示例:
-  # 基本用法 — 压缩 ./Videos 下所有 mp4
-  ./compress_videos.sh -i ./Video
+  # 一键配置 — 日常使用 (推荐)
+  ./compress_videos.sh -i ./Video --profile balanced
 
-  # 视觉无损 (CRF 18)，处理 mov 文件
-  ./compress_videos.sh -i ./Video -c 18 -f '*.mov'
+  # 收藏归档 — 质量优先
+  ./compress_videos.sh -i ./Video --profile archive --subdirs
 
-  # 快速压缩，包含子目录
-  ./compress_videos.sh -i ./Video -p fast --subdirs
-
-  # 全部自定义
-  ./compress_videos.sh -i ./Video -o ./Video_compressed -c 20 -p slow -n 5 -f "*.mp4" -b auto --subdirs
+  # 手动指定参数
+  ./compress_videos.sh -i ./Video -c 18 -p slow -b auto --subdirs

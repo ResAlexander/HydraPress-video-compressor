@@ -17,6 +17,7 @@
 #    ./compress_videos.sh              # 使用下方默认配置
 #    ./compress_videos.sh -i /path/in  # 命令行覆盖输入目录
 #    ./compress_videos.sh -i /in -o /out -c 22 -p fast
+#    ./compress_videos.sh -i /in --profile balanced
 #
 #  依赖: ffmpeg, bc (macOS 自带), nice, caffeinate
 # ============================================================
@@ -28,7 +29,9 @@ set -uo pipefail
 #
 #   -i, --input   源视频目录
 #   -o, --output  输出目录 (默认: 源目录_compressed)
-#   -c, --crf     CRF 值 (默认22，越小质量越高，推荐18~28)
+#   --profile     一键配置: archive/balanced/fast/max-compress
+#                 (覆盖 -c 和 -p)
+#   -c, --crf     CRF 值 (默认22，越小质量越高，推荐14~28)
 #   -p, --preset  编码速度预设 (默认slow，可选: ultrafast~veryslow)
 #   -n, --nice    nice 优先级 (默认10，0=不降级，19=最低)
 #   -f, --filter  文件名匹配 (默认 *.mp4)
@@ -40,13 +43,27 @@ set -uo pipefail
 
 INPUT_DIR=""                                    # 源视频目录 (必填，或用 -i)
 OUTPUT_DIR=""                                   # 输出目录 (留空则自动设为 源目录_compressed)
-CRF=22                                          # CRF 质量值: 18=视觉无损，22=默认推荐，28=高压缩
-PRESET="slow"                                   # 编码预设: 越慢质量越好/体积越小
+PROFILE=""                                      # 一键配置: archive/balanced/fast/max-compress (覆盖 CRF 和 PRESET)
+CRF=22                                          # CRF 质量值: 14-16=视觉无损，18-20=极高画质，22=默认，24+=有损
+PRESET="slow"                                   # 编码预设: 注意 x265 中越慢文件越大但质量越好(与x264相反)
 NICE_LEVEL=10                                   # nice 优先级: 0=正常，10=低，19=最低
 FILE_PATTERN="*.mp4"                            # 源文件名匹配模式
 BIT_DEPTH="auto"                                # 色深: 8/10/12/auto (默认 auto 跟随源文件)
 SUB_DIRS=false                                  # 是否递归处理子目录
 NOTIFICATION=true                               # 完成后弹出 macOS 通知
+
+# ---------- Profile 定义 ----------
+# 每个 profile 是 "preset:crf" 的组合，基于实测数据 (见 x265_encoding_guide.md)
+apply_profile() {
+    local profile=$1
+    case "$profile" in
+        archive)      PRESET="slow";      CRF=18 ;;  # 收藏归档: 质量优先
+        balanced)     PRESET="fast";      CRF=20 ;;  # 日常使用: 速度质量平衡
+        fast)         PRESET="ultrafast"; CRF=14 ;;  # 快速处理: 最快，文件较大
+        max-compress) PRESET="slow";      CRF=24 ;;  # 极限压缩: 最小体积
+        *) echo "[错误] 未知 profile: $profile (可选: archive, balanced, fast, max-compress)"; exit 1 ;;
+    esac
+}
 
 # =====================================================
 #  以下为脚本内部逻辑，通常无需修改
@@ -71,6 +88,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -i|--input)   INPUT_DIR="$2";    shift 2 ;;
         -o|--output)  OUTPUT_DIR="$2";   shift 2 ;;
+        --profile)    PROFILE="$2";      shift 2 ;;
         -c|--crf)     CRF="$2";          shift 2 ;;
         -p|--preset)  PRESET="$2";       shift 2 ;;
         -n|--nice)    NICE_LEVEL="$2";   shift 2 ;;
@@ -83,6 +101,12 @@ while [[ $# -gt 0 ]]; do
         *)            echo "未知参数: $1"; echo "运行 -h 查看快速帮助，--help 查看完整说明"; exit 1 ;;
     esac
 done
+
+# ---------- 应用 Profile ----------
+if [ -n "$PROFILE" ]; then
+    apply_profile "$PROFILE"
+    echo "[Profile] $PROFILE → preset=$PRESET, crf=$CRF"
+fi
 
 # ---------- 前置检查 ----------
 check_deps() {
@@ -125,111 +149,6 @@ detect_source_bit_depth() {
         *12le*) echo 12 ;;
         *)      echo 8  ;;
     esac
-}
-
-# 通过短片段编码 probe 估算源视频的等效 CRF（实际测量编码器行为）
-# 用于防止用户设定的 CRF 过低导致输出文件反而变大
-estimate_source_crf() {
-    local input=$1
-    local preset=$2
-
-    # 获取源视频码率（video stream 层）
-    local bitrate
-    bitrate=$(ffprobe -v error -select_streams v:0 -show_entries stream=bit_rate \
-              -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-    if [ -z "$bitrate" ] || [ "$bitrate" = "N/A" ] || [ "$bitrate" -le 0 ] 2>/dev/null; then
-        local duration file_size
-        duration=$(ffprobe -v error -show_entries format=duration \
-                   -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-        file_size=$(stat -f%z "$input")
-        bitrate=$(echo "scale=0; $file_size * 8 / ${duration%.*}" | bc)
-    fi
-
-    local source_bitrate_mbps
-    source_bitrate_mbps=$(echo "scale=4; $bitrate / 1000000" | bc)
-
-    # --- 短片段探针编码 ---
-    local probe_crf=28
-    local probe_frames=30
-    local total_frames
-    total_frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
-                   -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-    if [ -n "$total_frames" ] && [ "$total_frames" -gt 0 ] 2>/dev/null && [ "$total_frames" -lt 60 ]; then
-        probe_frames=$((total_frames / 2))
-    fi
-    [ "$probe_frames" -lt 5 ] && probe_frames=5
-
-    # 跳过开头 ~10% 视频时长（最长 10 秒），避免手机录制初期卡顿帧影响探针
-    local seek_at=0
-    local probe_duration_total
-    probe_duration_total=$(ffprobe -v error -show_entries format=duration \
-                          -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-    if [ -n "$probe_duration_total" ] && [ "$(echo "$probe_duration_total > 10" | bc -l 2>/dev/null)" -eq 1 ]; then
-        seek_at=$(echo "scale=0; $probe_duration_total * 0.1 / 1" | bc 2>/dev/null)
-        [ "$seek_at" -gt 10 ] && seek_at=10
-        [ "$seek_at" -lt 2 ] && seek_at=2
-    fi
-
-    local tmpfile="/tmp/probe_${$}_${RANDOM}.mp4"
-    if [ "$seek_at" -gt 0 ]; then
-        ffmpeg -y -ss "$seek_at" -i "$input" -vframes "$probe_frames" \
-            -c:v libx265 -preset "$preset" -crf "$probe_crf" \
-            -an "$tmpfile" 2>/dev/null
-    else
-        ffmpeg -y -i "$input" -vframes "$probe_frames" \
-            -c:v libx265 -preset "$preset" -crf "$probe_crf" \
-            -an "$tmpfile" 2>/dev/null
-    fi
-
-    local probe_size
-    probe_size=$(stat -f%z "$tmpfile" 2>/dev/null)
-    rm -f "$tmpfile"
-
-    local estimated=""
-    if [ -n "$probe_size" ] && [ "$probe_size" -gt 1000 ]; then
-        local fps fps_num fps_den probe_duration probe_bitrate_mbps
-        fps=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate \
-              -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-        fps_num=${fps%%/*}
-        fps_den=${fps##*/}
-        [ -z "$fps_den" ] || [ "$fps_den" -eq 0 ] 2>/dev/null && fps_den=1
-        probe_duration=$(echo "scale=6; $probe_frames * $fps_den / $fps_num" | bc)
-        probe_bitrate_mbps=$(echo "scale=4; $probe_size * 8 / $probe_duration / 1000000" | bc)
-
-        if [ "$(echo "$probe_bitrate_mbps > 0" | bc -l)" -eq 1 ]; then
-            # CRF = probe_crf + ln(source_bitrate / probe_bitrate) / ln(0.85)
-            estimated=$(echo "scale=2; $probe_crf + l($source_bitrate_mbps / $probe_bitrate_mbps) / l(0.85)" | bc -l 2>/dev/null)
-        fi
-    fi
-
-    # probe 失败时回退到公式估算
-    if [ -z "$estimated" ] || [ "$(echo "$estimated < 0" | bc -l 2>/dev/null)" -eq 1 ]; then
-        local width height pix_count
-        width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width \
-                -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-        height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height \
-                 -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
-        pix_count=$((width * height))
-        [ "$pix_count" -le 0 ] && pix_count=2073600
-
-        local ref_pix=$((1920 * 1080))
-        local norm_bitrate
-        norm_bitrate=$(echo "scale=4; $source_bitrate_mbps * $ref_pix / $pix_count" | bc)
-
-        estimated=$(echo "scale=2; 20 + l($norm_bitrate / 20) / l(0.85)" | bc -l 2>/dev/null)
-        if [ -z "$estimated" ] || [ "$(echo "$estimated < 0" | bc -l 2>/dev/null)" -eq 1 ]; then
-            estimated=0
-        fi
-    fi
-
-    if [ "$(echo "$estimated > 51" | bc -l 2>/dev/null)" -eq 1 ]; then
-        estimated=51
-    fi
-
-    # 向上取整再加 1 安全余量
-    python3 -c "import math; print(int(math.ceil($estimated)) + 1)" 2>/dev/null || \
-    python3 -c "print(int($estimated / 1 + 0.999) + 1)" 2>/dev/null || \
-    echo "${estimated%.*}" | awk '{print $1+2}'
 }
 
 # 格式化文件大小为可读字符串 (字节 → KB/MB/GB)
@@ -342,15 +261,6 @@ for f in "${files[@]}"; do
     PIX_FMT=$(pix_fmt_for_bit_depth "$actual_depth")
     echo "  输出色深: $actual_depth-bit (pix_fmt=$PIX_FMT)"
 
-    # ---------- CRF 合理性检查 ----------
-    # 估算源视频在 HEVC 下的等效 CRF，若用户 CRF 低于该值则自动抬高
-    source_crf=$(estimate_source_crf "$f" "$PRESET")
-    actual_crf=$CRF
-    if [ "$(echo "$actual_crf < $source_crf" | bc 2>/dev/null)" -eq 1 ]; then
-        echo "  [警告] $filename CRF=$actual_crf 过低, 使用 $source_crf"
-        actual_crf=$source_crf
-    fi
-
     # ---------- 计算总帧数用于进度条 ----------
     total_frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
         -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null)
@@ -375,7 +285,7 @@ for f in "${files[@]}"; do
     nice -n "$NICE_LEVEL" ffmpeg -y -i "$f" \
         -c:v libx265 \
         -preset "$PRESET" \
-        -crf "$actual_crf" \
+        -crf "$CRF" \
         -pix_fmt "$PIX_FMT" \
         -tag:v hvc1 \
         -c:a copy \
