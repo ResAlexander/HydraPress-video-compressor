@@ -381,6 +381,21 @@ for f in "${files[@]}"; do
     PIX_FMT=$(pix_fmt_for_bit_depth "$actual_depth")
     echo "  输出色深: $actual_depth-bit (pix_fmt=$PIX_FMT)"
 
+    # ---------- 确保宽高为偶数 (4:2:0 色度子采样要求) ----------
+    # yuv420p / yuv420p10le / yuv420p12le 均要求宽高为偶数，
+    # 否则 x265 报错: Picture height must be an integer multiple of the specified chroma subsampling
+    # 若任一为奇数，用 scale 截成偶数尺寸 (最多损失 1 像素，肉眼不可见)
+    # 注意: 用字符串而非数组，macOS 默认 bash 3.2 下 set -u 对空数组扩展会报 unbound variable
+    VF_OPTS=""
+    # csv=p=0 输出单行 "width,height"，两行输出会让 read 只取到第一个值
+    dims=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height \
+        -of csv=p=0 "$f" 2>/dev/null)
+    IFS=, read -r vw vh <<< "$dims"
+    if [ -n "$vw" ] && [ -n "$vh" ] && { [ $((vw % 2)) -ne 0 ] || [ $((vh % 2)) -ne 0 ]; }; then
+        VF_OPTS="-vf scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        echo "  尺寸修正: ${vw}x${vh} → $((vw / 2 * 2))x$((vh / 2 * 2)) (宽高需为偶数)"
+    fi
+
     # ---------- 计算总帧数用于进度条 ----------
     total_frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
         -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null)
@@ -411,6 +426,7 @@ for f in "${files[@]}"; do
     fi
     err_log=$(mktemp)
     nice -n "$NICE_LEVEL" ffmpeg -y -i "$f" \
+        $VF_OPTS \
         -c:v libx265 \
         -preset "$PRESET" \
         -crf "$CRF" \
@@ -472,7 +488,9 @@ for f in "${files[@]}"; do
         total_output_size=$((total_output_size + output_size))
 
         # 计算节省比例
-        savings=$(echo "scale=1; (1 - $output_size / $input_size) * 100" | bc)
+        # 先用 scale=3 保证除法有足够精度，再用 printf 四舍五入到 1 位小数
+        # (直接 scale=1 时 bc 整除会把小比例截成 0，导致节省率误显示为 100%)
+        savings=$(printf "%.1f" "$(echo "scale=3; (1 - $output_size / $input_size) * 100" | bc)")
         output_size_str=$(human_size "$output_size")
 
         echo "  完成: $filename  ($input_size_str -> $output_size_str, 节省 ${savings}%)"
@@ -491,7 +509,7 @@ done
 # ---------- 最终报告 ----------
 total_savings=""
 if [ "$total_input_size" -gt 0 ] && [ "$total_output_size" -gt 0 ]; then
-    total_savings=$(echo "scale=1; (1 - $total_output_size / $total_input_size) * 100" | bc)
+    total_savings=$(printf "%.1f" "$(echo "scale=3; (1 - $total_output_size / $total_input_size) * 100" | bc)")
 fi
 
 echo ""
